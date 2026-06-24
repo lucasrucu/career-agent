@@ -4,7 +4,7 @@ A living plan for where Career Agent goes after the v1 MVP. The MVP proves the c
 (upload → review → search → score → tailor → export). This document captures what's next and
 *why*, so development can continue without re-deriving the reasoning each time.
 
-Status legend: 🟢 planned next · 🟡 mid-term · ⚪ later / exploratory.
+Status legend: ✅ shipped · 🟢 planned next · 🟡 mid-term · ⚪ later / exploratory.
 
 ---
 
@@ -19,7 +19,7 @@ Status legend: 🟢 planned next · 🟡 mid-term · ⚪ later / exploratory.
 
 ---
 
-## Theme 1 — A profile that captures the *whole* candidate 🟢
+## Theme 1 — A profile that captures the *whole* candidate ✅ shipped
 
 **The problem (a real one we found in testing):** the `Profile` schema has sections for contact,
 summary, experience, education, skills, and certifications — and *nothing else*. So anything that
@@ -43,11 +43,17 @@ it entirely. The system didn't *judge* it unimportant — it had no slot for it.
   silently delete a standout achievement.
 - Render it as a compact "Interests & Achievements" block in the PDF.
 
-**Why this is first:** it's a correctness gap, not just a nice-to-have. The product currently
-makes resumes slightly *worse* than the source on a real dimension. Fixing it is high-value and
+**Why this was first:** it's a correctness gap, not just a nice-to-have. The product used to make
+resumes slightly *worse* than the source on a real dimension. Fixing it was high-value and
 self-contained.
 
-## Theme 2 — Suggest roles instead of making the user search 🟢
+> **Shipped.** `interests?: { title, detail?, signal? }[]` runs end to end — parse captures them,
+> match weighs them modestly as soft-skill evidence, tailoring keeps a tight role-aware version
+> instead of deleting them, the PDF renders an "Interests & Achievements" block, and the profile
+> editor has a card for them. Verified on a real resume: the Ironman / World-Championship triathlon
+> qualification that used to be dropped now survives all the way to the exported PDF.
+
+## Theme 2 — Suggest roles instead of making the user search ✅ shipped
 
 Today the user types a query and we search Adzuna. But the app already holds a structured profile —
 it should be able to say *"here's what you should be looking for."*
@@ -63,6 +69,11 @@ it should be able to say *"here's what you should be looking for."*
 
 This turns Career Agent from a tool you *drive* into one that *advises* — the natural next step once
 an initial resume exists.
+
+> **Shipped (role discovery).** `GET /api/roles/suggest` reads the profile and returns 5–8 concrete
+> titles with a one-line rationale each, surfaced as tappable chips under the search box — one tap
+> runs that search. Grounded only in what the profile supports; returns nothing when the profile is
+> too thin. The *field/direction read* and *saved searches & alerts* are still open.
 
 ## Theme 3 — Conversational skill-mapping 🟡
 
@@ -91,10 +102,16 @@ edit; the chat was deferred.
 - **Batch scoring** — score a whole search page at once, ranked, instead of one role at a time.
 - **Explainable score breakdown** — sub-scores (skills / experience / domain) behind the headline %.
 
-## Theme 6 — Pipeline & insight ⚪
+## Theme 6 — Pipeline & insight 🟡 (partly shipped)
 
-- Make the `Interested → Drafted → Applied → Interviewing → Closed` pipeline first-class:
-  a board view, per-stage notes, follow-up reminders.
+> **Shipped (the spine).** Saved jobs are now a real pipeline: a dedicated "Saved" tab lists them,
+> each card carries its persisted match analysis and a status you can move through
+> `interested → drafted → applied → interviewing → closed`, and the Overview surfaces your past
+> uploaded resumes and tailored drafts for re-download. Search results and in-progress profile
+> edits also survive navigation now (with an unsaved-changes guard).
+
+Still open:
+- A **board view** of the pipeline, per-stage notes, and follow-up reminders.
 - Lightweight analytics: which roles you match best, where your gaps cluster, response rates.
 
 ## Platform & hardening (ongoing)
@@ -110,10 +127,12 @@ edit; the chat was deferred.
 
 ## Near-term order of work
 
-1. **Theme 1** — `interests`/`achievements` section end to end (schema → parse → match → draft → PDF).
-2. **Theme 2** — role discovery + field read from the profile.
-3. **Theme 4** — cover letters and the portfolio PDF template.
-4. **Theme 5** — `pgvector` pre-filter once volume justifies it.
+1. ~~**Theme 1** — `interests`/`achievements` section end to end~~ ✅ **shipped.**
+2. ~~**Theme 2** — role discovery from the profile~~ ✅ **shipped** (the *field/direction read* is still open).
+3. **Theme 6** — finish the pipeline: a board view, per-stage notes, follow-up reminders, light analytics
+   (the saved-jobs spine + status + history already landed).
+4. **Theme 4** — cover letters and the portfolio PDF template.
+5. **Theme 5** — `pgvector` pre-filter once volume justifies it.
 
 Everything here preserves the core principle: real experience, honestly presented, with the AI
 doing the tedious work and the human keeping control.

@@ -44,3 +44,4 @@ next-env.d.ts
 
 # e2e pipeline output artifact
 scripts/e2e-out.pdf
+.claude/launch.json

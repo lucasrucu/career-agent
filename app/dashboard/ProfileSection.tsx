@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertCircle,
   Download,
   FileUp,
   Loader2,
@@ -38,6 +39,7 @@ import type {
   Skill,
   SkillLevel,
 } from "@/lib/types";
+import { useDashboardUI } from "./DashboardUIContext";
 
 const SKILL_LEVELS: SkillLevel[] = [
   "beginner",
@@ -102,9 +104,16 @@ function normalize(p: Profile | undefined | null): Profile {
 export function ProfileSection() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { setProfileDirty } = useDashboardUI();
 
   const [profile, setProfile] = useState<Profile>(emptyProfile());
   const [hydrated, setHydrated] = useState(false);
+  // JSON snapshot of the last server-synced profile (hydrate / parse / save).
+  // dirty = the live form has diverged from this snapshot.
+  const [snapshot, setSnapshot] = useState(() =>
+    JSON.stringify(emptyProfile())
+  );
+  const dirty = JSON.stringify(profile) !== snapshot;
 
   const profileQuery = useQuery({
     queryKey: ["profile"],
@@ -115,10 +124,34 @@ export function ProfileSection() {
   // clobber the user's in-progress edits on refetch).
   useEffect(() => {
     if (!hydrated && profileQuery.isSuccess) {
-      setProfile(normalize(profileQuery.data?.profile));
+      const fresh = normalize(profileQuery.data?.profile);
+      setProfile(fresh);
+      setSnapshot(JSON.stringify(fresh));
       setHydrated(true);
     }
   }, [hydrated, profileQuery.isSuccess, profileQuery.data]);
+
+  // Surface dirty state to the dashboard so it can guard tab switches.
+  useEffect(() => {
+    setProfileDirty(dirty);
+  }, [dirty, setProfileDirty]);
+
+  // Clear the dirty flag when the editor unmounts (e.g. tab switch after a
+  // confirmed discard) so it can't leak into other tabs' guards.
+  useEffect(() => {
+    return () => setProfileDirty(false);
+  }, [setProfileDirty]);
+
+  // Warn on full page unload (refresh / close) while there are unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   const parseMutation = useMutation({
     mutationFn: parseResume,
@@ -126,6 +159,8 @@ export function ProfileSection() {
       toast.loading("Parsing resume…", { id: "parse" });
     },
     onSuccess: (parsed) => {
+      // A freshly parsed resume IS unsaved work — treat it as dirty against the
+      // last server snapshot so the user is nudged to save it.
       setProfile(normalize(parsed));
       setHydrated(true);
       toast.success("Resume parsed. Review and save below.", { id: "parse" });
@@ -140,9 +175,12 @@ export function ProfileSection() {
     onMutate: () => {
       toast.loading("Saving profile…", { id: "save" });
     },
-    onSuccess: (record) => {
+    onSuccess: (record, savedProfile) => {
       queryClient.setQueryData(["profile"], record);
       queryClient.invalidateQueries({ queryKey: ["profile"] });
+      // Snapshot the profile we just saved so dirty clears (the refetch won't
+      // re-hydrate the form, so we can't rely on it to reset the baseline).
+      setSnapshot(JSON.stringify(savedProfile));
       toast.success(`Profile saved (v${record.version}).`, { id: "save" });
     },
     onError: (err: Error) => {
@@ -731,6 +769,12 @@ export function ProfileSection() {
               )}
               Export PDF
             </Button>
+            {dirty ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-500">
+                <AlertCircle className="size-3.5" />
+                Unsaved changes
+              </span>
+            ) : null}
             {!profile.contact.name.trim() ? (
               <span className="text-xs text-muted-foreground">
                 Add a name to save.

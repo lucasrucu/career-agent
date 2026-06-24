@@ -134,3 +134,37 @@ export const MATCH_SCHEMA: Anthropic.Tool.InputSchema = {
   },
   required: ["match_pct", "strengths", "gaps", "keywords"],
 };
+
+// Role-suggestion shape Claude returns (Theme 2 / G). Concrete, searchable job
+// titles grounded only in the candidate's real profile — never roles the
+// experience doesn't support.
+export const ROLE_SUGGESTIONS_SCHEMA: Anthropic.Tool.InputSchema = {
+  type: "object",
+  properties: {
+    suggestions: {
+      type: "array",
+      description: "5-8 concrete roles the candidate is genuinely qualified to pursue.",
+      items: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "A concrete job title, e.g. 'Data Engineer' or 'Senior Frontend Developer'.",
+          },
+          query: {
+            type: "string",
+            description:
+              "The search string to run on a job board — usually the title or a slight generalization of it.",
+          },
+          rationale: {
+            type: "string",
+            description:
+              "One honest sentence grounded in the real profile, e.g. 'Your SQL and pipeline work maps directly to this role.'",
+          },
+        },
+        required: ["title", "query", "rationale"],
+      },
+    },
+  },
+  required: ["suggestions"],
+};

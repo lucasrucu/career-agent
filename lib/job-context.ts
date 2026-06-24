@@ -13,8 +13,10 @@ export interface JobResolveBody {
 }
 
 // Deterministic short id so a pasted description maps to a stable job_id —
-// lets the match cache hit on repeated scoring of the same pasted text.
-function localId(s: string): string {
+// lets the match cache hit on repeated scoring of the same pasted text. Shared
+// with the client (JobsSection builds the same `local:<id>` for a pasted Job)
+// so the cache and saved-job dedupe line up on identical text.
+export function localId(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
     h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
@@ -42,7 +44,7 @@ export async function resolveJob(
   if (body.job_description && body.job_description.trim()) {
     const desc = body.job_description.trim();
     return {
-      id: `pasted:${localId(desc)}`,
+      id: `local:${localId(desc)}`,
       title: "Pasted job description",
       company: "",
       location: "",

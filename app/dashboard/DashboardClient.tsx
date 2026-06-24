@@ -1,24 +1,52 @@
 "use client";
 
 import { useState } from "react";
-import { Briefcase, Gauge, Search, UserCog } from "lucide-react";
+import { Bookmark, Briefcase, Gauge, Search, UserCog } from "lucide-react";
 
 import { SignOutButton } from "@/components/SignOutButton";
 import { cn } from "@/lib/utils";
+import { DashboardUIProvider, useDashboardUI } from "./DashboardUIContext";
 import { OverviewSection } from "./OverviewSection";
 import { ProfileSection } from "./ProfileSection";
 import { JobsSection } from "./JobsSection";
+import { SavedSection } from "./SavedSection";
 
-export type DashboardTab = "overview" | "profile" | "jobs";
+export type DashboardTab = "overview" | "profile" | "jobs" | "saved";
 
 const TABS: { id: DashboardTab; label: string; icon: typeof Gauge }[] = [
   { id: "overview", label: "Overview", icon: Gauge },
   { id: "profile", label: "Profile", icon: UserCog },
   { id: "jobs", label: "Jobs", icon: Search },
+  { id: "saved", label: "Saved", icon: Bookmark },
 ];
 
 export function DashboardClient({ userName }: { userName: string }) {
+  return (
+    <DashboardUIProvider>
+      <DashboardShell userName={userName} />
+    </DashboardUIProvider>
+  );
+}
+
+function DashboardShell({ userName }: { userName: string }) {
   const [tab, setTab] = useState<DashboardTab>("overview");
+  const { profileDirty } = useDashboardUI();
+
+  // Guard tab switches away from the Profile tab when it holds unsaved edits.
+  function switchTab(next: DashboardTab) {
+    if (next === tab) return;
+    if (
+      tab === "profile" &&
+      profileDirty &&
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "You have unsaved changes to your profile. Leave without saving?"
+      )
+    ) {
+      return;
+    }
+    setTab(next);
+  }
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -39,7 +67,7 @@ export function DashboardClient({ userName }: { userName: string }) {
             <button
               key={t.id}
               type="button"
-              onClick={() => setTab(t.id)}
+              onClick={() => switchTab(t.id)}
               className={cn(
                 "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
                 active
@@ -56,10 +84,11 @@ export function DashboardClient({ userName }: { userName: string }) {
       </nav>
 
       {tab === "overview" ? (
-        <OverviewSection userName={userName} onNavigate={setTab} />
+        <OverviewSection userName={userName} onNavigate={switchTab} />
       ) : null}
       {tab === "profile" ? <ProfileSection /> : null}
       {tab === "jobs" ? <JobsSection /> : null}
+      {tab === "saved" ? <SavedSection /> : null}
     </main>
   );
 }
