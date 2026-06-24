@@ -41,3 +41,6 @@ next-env.d.ts
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# e2e pipeline output artifact
+scripts/e2e-out.pdf

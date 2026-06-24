@@ -41,7 +41,7 @@ async function main() {
   // 2. Parse → Profile (FR-3)
   const profile = await generateStructured<Profile>({
     system:
-      "You are a resume parser. Extract only real information into the schema; never invent anything. Infer skill level only with clear signal, else 'intermediate'.",
+      "You are a resume parser. Extract only real information into the schema; never invent anything. Infer skill level only with clear signal, else 'intermediate'. Capture signal-bearing interests, achievements, and extracurriculars (endurance sport, competitions, volunteering, open-source, leadership) into 'interests' rather than dropping them.",
     prompt: `Parse this resume into the structured schema.\n<<<RESUME\n${text}\nRESUME`,
     toolName: "save_profile",
     toolDescription: "Save the candidate's structured profile.",
@@ -50,7 +50,7 @@ async function main() {
   });
   log(
     "parse",
-    `name="${profile.contact.name}", experiences=${profile.experiences.length}, education=${profile.education.length}, skills=${profile.skills.length}, certs=${profile.certifications.length}`
+    `name="${profile.contact.name}", experiences=${profile.experiences.length}, education=${profile.education.length}, skills=${profile.skills.length}, certs=${profile.certifications.length}, interests=${profile.interests?.length ?? 0}`
   );
   console.log("  summary:", profile.summary.slice(0, 160) + "…");
 
@@ -116,7 +116,7 @@ async function main() {
   // Integrity check: tailoring must not invent experience entries.
   log(
     "draft",
-    `tailored experiences=${tailored.experiences.length} (source=${profile.experiences.length}), summary len=${tailored.summary.length}`
+    `tailored experiences=${tailored.experiences.length} (source=${profile.experiences.length}), interests=${tailored.interests?.length ?? 0} (source=${profile.interests?.length ?? 0}), summary len=${tailored.summary.length}`
   );
 
   // 6. PDF export (FR-9)

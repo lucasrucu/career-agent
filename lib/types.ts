@@ -37,6 +37,12 @@ export interface Certification {
   year?: string;
 }
 
+export interface Interest {
+  title: string; // short label, e.g. "Triathlon" or "Open-source maintainer"
+  detail?: string; // specifics, e.g. "Ironman finisher; 2024 World Championship age-group qualifier"
+  signal?: string; // the soft-skill/trait it evidences, e.g. "Discipline, long-horizon goal-setting, resilience"
+}
+
 export interface Profile {
   contact: Contact;
   summary: string;
@@ -44,6 +50,7 @@ export interface Profile {
   education: Education[];
   skills: Skill[];
   certifications: Certification[];
+  interests?: Interest[];
 }
 
 export interface ProfileRecord {

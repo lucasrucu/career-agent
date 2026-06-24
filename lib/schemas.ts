@@ -79,6 +79,31 @@ export const PROFILE_SCHEMA: Anthropic.Tool.InputSchema = {
         required: ["name"],
       },
     },
+    interests: {
+      type: "array",
+      description:
+        "Signal-bearing extracurriculars and standout achievements that evidence soft skills — endurance sport, competitions, volunteering, open-source, leadership. Capture these instead of dropping them; leave empty if the resume has none. Never invent anything not in the resume.",
+      items: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Short label, e.g. 'Triathlon' or 'Open-source maintainer'.",
+          },
+          detail: {
+            type: "string",
+            description:
+              "Specifics, e.g. 'Ironman finisher; 2024 World Championship age-group qualifier'.",
+          },
+          signal: {
+            type: "string",
+            description:
+              "The soft skill or trait it evidences, e.g. 'Discipline, long-horizon goal-setting, resilience'.",
+          },
+        },
+        required: ["title"],
+      },
+    },
   },
   required: ["contact", "summary", "experiences", "education", "skills", "certifications"],
 };

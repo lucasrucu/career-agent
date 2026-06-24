@@ -33,6 +33,7 @@ import type {
   Certification,
   Education,
   Experience,
+  Interest,
   Profile,
   Skill,
   SkillLevel,
@@ -53,6 +54,7 @@ function emptyProfile(): Profile {
     education: [],
     skills: [],
     certifications: [],
+    interests: [],
   };
 }
 
@@ -88,6 +90,11 @@ function normalize(p: Profile | undefined | null): Profile {
       name: c.name ?? "",
       issuer: c.issuer ?? "",
       year: c.year ?? "",
+    })),
+    interests: (p.interests ?? []).map((it) => ({
+      title: it.title ?? "",
+      detail: it.detail ?? "",
+      signal: it.signal ?? "",
     })),
   };
 }
@@ -227,10 +234,17 @@ export function ProfileSection() {
     });
   }
 
-  function removeAt<K extends "experiences" | "education" | "skills" | "certifications">(
-    key: K,
-    i: number
-  ) {
+  function updateInterest(i: number, patch: Partial<Interest>) {
+    setProfile((p) => {
+      const interests = [...(p.interests ?? [])];
+      interests[i] = { ...interests[i], ...patch };
+      return { ...p, interests };
+    });
+  }
+
+  function removeAt<
+    K extends "experiences" | "education" | "skills" | "certifications" | "interests"
+  >(key: K, i: number) {
     setProfile((p) => ({
       ...p,
       [key]: (p[key] as unknown[]).filter((_, idx) => idx !== i),
@@ -615,6 +629,78 @@ export function ProfileSection() {
                   }
                 >
                   <Plus className="size-3.5" /> Add certification
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Interests & Achievements */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Interests &amp; Achievements</CardTitle>
+              <CardDescription>
+                Signal-bearing extracurriculars — endurance sport, competitions,
+                volunteering, open-source, leadership — and the traits they show.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {(profile.interests ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No interests yet.
+                </p>
+              ) : null}
+              {(profile.interests ?? []).map((interest, i) => (
+                <div
+                  key={i}
+                  className="flex flex-col gap-3 rounded-lg border border-border p-3"
+                >
+                  <Input
+                    value={interest.title}
+                    onChange={(e) =>
+                      updateInterest(i, { title: e.target.value })
+                    }
+                    placeholder="Title (e.g. Triathlon)"
+                  />
+                  <Input
+                    value={interest.detail ?? ""}
+                    onChange={(e) =>
+                      updateInterest(i, { detail: e.target.value })
+                    }
+                    placeholder="Detail (e.g. Ironman finisher; 2024 World Championship qualifier)"
+                  />
+                  <Input
+                    value={interest.signal ?? ""}
+                    onChange={(e) =>
+                      updateInterest(i, { signal: e.target.value })
+                    }
+                    placeholder="Signal (e.g. Discipline, resilience, long-horizon goal-setting)"
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => removeAt("interests", i)}
+                    >
+                      <Trash2 className="size-3.5" /> Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setProfile((p) => ({
+                      ...p,
+                      interests: [
+                        ...(p.interests ?? []),
+                        { title: "", detail: "", signal: "" },
+                      ],
+                    }))
+                  }
+                >
+                  <Plus className="size-3.5" /> Add interest
                 </Button>
               </div>
             </CardContent>
