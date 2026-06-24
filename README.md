@@ -12,6 +12,10 @@
 
 > A full-stack AI product I built end to end — auth, database, a structured-output LLM pipeline, a third-party job API, and PDF generation — not a wrapper around a single prompt.
 
+<p align="center">
+  <img src="docs/landing.png" alt="Career Agent — landing page" width="100%">
+</p>
+
 ---
 
 ## What it does
@@ -80,12 +84,11 @@ Then apply the migrations in `supabase/migrations/` — `0001_init.sql` (tables,
 ## Documentation
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how it's built: the AI pipeline, parsing, scoring, data model, security.
-- **[docs/ROADMAP.md](docs/ROADMAP.md)** — where it's going next.
-- **[PRD.md](PRD.md)** — the original product spec and decisions.
+- **[PRD.md](PRD.md)** — the product spec and the decisions behind it.
 
 ## Status
 
-Live and past MVP — the full flow works end to end (upload → review → suggest → search → score → save/track → tailor → export), plus a public landing page with a clickable live demo and a request-access form. Built as a portfolio project and as a tool for my own job search. Matching is LLM-only for now; English-only resumes. See the roadmap for what's next.
+A complete, working product. The full flow runs end to end — upload → review → suggest → search → score → save & track → tailor → export — fronted by a public landing page with a clickable live demo and a request-access flow. Built as a portfolio project and as a tool for my own job search. Matching is LLM-only and resumes are English-only for now.
 
 ---
 
