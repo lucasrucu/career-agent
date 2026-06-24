@@ -1,6 +1,8 @@
 -- Career Agent — initial schema (PRD §8).
 -- All user-data tables are RLS-scoped by user_id. Apply via the Supabase SQL
--- editor or the Supabase MCP against Career Agent's own project.
+-- editor or the Supabase MCP against the SHARED snip project
+-- (ref xbpbuwrrpnhaubimihpq). Additive only — adds Career Agent's tables, types,
+-- and the `resumes` bucket; does not touch snip's `links` table.
 
 -- ---------------------------------------------------------------------------
 -- Enums

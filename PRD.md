@@ -107,7 +107,7 @@ Ported/shared with the Financial Dashboard unless noted:
 - **Styling**: Tailwind CSS with the dashboard's HSL CSS-variable theme (dark, green accent `--primary: 142.1 70.6% 45.3%`). Port `app/globals.css` theme tokens and `tailwind.config.ts`.
 - **UI**: shadcn-style components on `@base-ui/react`; reuse `components/ui/`.
 - **Fonts**: Geist (sans + mono).
-- **Auth + DB**: Supabase (`@supabase/ssr`) with Google OAuth; port `lib/supabase/`, `lib/auth.ts`, and the login/callback flow. New, separate Supabase project from the dashboard and from `snip`.
+- **Auth + DB**: Supabase (`@supabase/ssr`) with Google OAuth; port `lib/supabase/`, `lib/auth.ts`, and the login/callback flow. **Shares snip's Supabase project** (ref `xbpbuwrrpnhaubimihpq`) — one user pool across the qori tools; the Financial Dashboard stays on its own project. *(Amended 2026-06-24, superseding the original "new separate project" plan — see §12.7.)*
 - **AI**: Claude API (Anthropic SDK). **One configurable model** for all calls in v1 via a single server-side env var `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`; set to `claude-haiku-4-5` for cheap testing). Not exposed to users. All Claude calls server-side (route handlers); use structured/tool output for parsing, scoring, and drafting. Model split (stronger model for parse/score/draft) is a trivial later change if quality demands it.
 - **Job data**: Adzuna REST API (free developer tier — `app_id` + `app_key`). Default country **US**; Canada and other Adzuna-covered countries selectable. Indonesia isn't covered and isn't needed — US/CA/remote roles are the target.
 - **Resume parsing input**: a PDF/DOCX text extractor (e.g. `pdf-parse` / `mammoth` for docx) feeding text to Claude.
@@ -187,6 +187,7 @@ All open questions were resolved on 2026-06-24:
 4. **Resume template** — **One** professional, ATS-friendly template for v1 (single-column, light, print/parser-safe). Dark "portfolio" variant deferred to v2. The dashboard styling applies to the app UI, not the resume document.
 5. **Claude model** — **One** server-side model via env var `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`, `claude-haiku-4-5` for testing. Not user-facing. Per-task model split deferred (trivial later change).
 6. **Match-scoring approach** — **LLM-only** (per-job Claude scoring, cached) for v1. `pgvector` semantic index deferred to v2.
+7. **Supabase project** *(amended 2026-06-24)* — **Shares snip's project** (ref `xbpbuwrrpnhaubimihpq`) instead of a new one, driven by the Supabase free-tier 2-project limit. One shared user pool; Career Agent's tables are additive and RLS-isolated; Financial Dashboard stays separate. Hosting on a free `*.vercel.app` subdomain for now; a `*.qori.click` subdomain (with `.qori.click` cookie-domain SSO across tools) is the eventual target but not v1-blocking.
 
 ---
 
