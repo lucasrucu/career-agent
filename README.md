@@ -17,7 +17,7 @@ Supabase + Google OAuth, and UI components.
 
 - Next.js 14 (App Router) + TypeScript
 - Tailwind CSS + shadcn-style UI on `@base-ui/react` ("Sovereign" light theme, amber/gold accent)
-- Supabase — Google OAuth + Postgres + Storage (its own project, separate from the dashboard and snip)
+- Supabase — Google OAuth + Postgres + Storage. **Shares snip's project** (one user pool across the qori tools); the Financial Dashboard stays on its own project.
 - Claude API (Anthropic SDK) — one server-side model via `ANTHROPIC_MODEL`
 - Adzuna REST API — real job listings (US default; CA + other covered countries selectable)
 - `@react-pdf/renderer` — PDF export · `pdf-parse` / `mammoth` — resume text extraction
@@ -55,15 +55,18 @@ All Claude and Adzuna calls run server-side in route handlers; secrets stay serv
 
 1. `npm install`
 2. Copy `.env.example` → `.env.local` and fill in:
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+   - Supabase: use **snip's** project values (`NEXT_PUBLIC_SUPABASE_URL`,
+     `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) — Career Agent shares it.
    - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`; `claude-haiku-4-5` for cheap testing)
    - `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (free developer tier)
    - `NEXT_PUBLIC_SITE_URL=http://localhost:3000`
-3. Apply the schema in `supabase/migrations/` (via the Supabase MCP or the SQL editor).
-4. Enable the Google provider in Supabase Auth and add the redirect URLs
-   (`http://localhost:3000/auth/callback`, and the Vercel URL once deployed).
-5. Create a **private** Supabase Storage bucket for uploaded resumes (scoped per user).
-6. `npm run dev` → http://localhost:3000
+3. Apply `supabase/migrations/0001_init.sql` to the **shared** project (Supabase MCP or SQL
+   editor). It only *adds* Career Agent's tables + the `resumes` bucket — it never touches
+   snip's `links` table.
+4. In Supabase Auth, **add** `http://localhost:3000/auth/callback` (and the Vercel URL once
+   deployed) to the redirect allow-list. Google provider is already enabled on the shared project.
+   The migration creates the private `resumes` Storage bucket.
+5. `npm run dev` → http://localhost:3000
 
 ## Database
 
