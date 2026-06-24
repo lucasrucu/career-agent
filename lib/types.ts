@@ -87,6 +87,13 @@ export interface SavedJob extends Job {
   saved_at: string;
 }
 
+// A saved job enriched with its latest cached match and a draft-exists flag,
+// for the Saved pipeline view. `match` is null until the job has been scored.
+export interface SavedJobDetail extends SavedJob {
+  match: MatchResult | null;
+  has_draft: boolean;
+}
+
 export interface JobSearchParams {
   query: string;
   where?: string;
@@ -118,6 +125,44 @@ export interface ResumeDraft {
   content: Profile;
   // Set once exported; filename pattern {LastName}_{Company}_{Role}.pdf.
   export_filename?: string;
+}
+
+// --- Resume & draft history (Theme E) ---------------------------------------
+
+// An uploaded source resume, surfaced on the Overview with a short-lived signed
+// download URL for the original file (null if signing failed for that row).
+export interface ResumeUpload {
+  id: string;
+  file_name: string;
+  parse_status: "pending" | "parsed" | "failed";
+  created_at: string;
+  download_url: string | null;
+}
+
+// A saved tailored draft, labelled with its role (stitched from saved_jobs) and
+// carrying the tailored Profile so the client can re-export the PDF.
+export interface DraftSummary {
+  id: string;
+  job_id: string;
+  export_filename: string | null;
+  profile_version: number;
+  updated_at: string;
+  job_title: string | null;
+  job_company: string | null;
+  content: Profile;
+}
+
+// --- Role suggestions (Theme 2 / G) -----------------------------------------
+
+// A concrete, searchable role proposed from the candidate's real profile.
+export interface RoleSuggestion {
+  title: string; // a concrete job title
+  query: string; // the search string to run on Adzuna (often = title)
+  rationale: string; // one honest sentence grounded in the profile
+}
+
+export interface RoleSuggestionsResponse {
+  suggestions: RoleSuggestion[];
 }
 
 // --- API envelopes ----------------------------------------------------------

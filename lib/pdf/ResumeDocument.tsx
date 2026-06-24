@@ -25,8 +25,15 @@ const styles = StyleSheet.create({
     color: "#1a1a1a",
     lineHeight: 1.4,
   },
-  name: { fontSize: 20, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  contact: { fontSize: 9, color: "#444", marginBottom: 2 },
+  name: { fontSize: 20, fontFamily: "Helvetica-Bold", marginBottom: 6 },
+  contact: {
+    fontSize: 9,
+    color: "#444",
+    lineHeight: 1.5,
+    paddingBottom: 8,
+    marginBottom: 4,
+    borderBottom: "1 solid #e2e2e2",
+  },
   sectionTitle: {
     fontSize: 11,
     fontFamily: "Helvetica-Bold",

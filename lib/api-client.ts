@@ -4,12 +4,17 @@
 
 import type {
   ApiResult,
+  DraftSummary,
   Job,
   MatchResult,
   Profile,
   ProfileRecord,
   ResumeDraft,
+  ResumeUpload,
+  RoleSuggestion,
+  RoleSuggestionsResponse,
   SavedJob,
+  SavedJobDetail,
   SavedJobStatus,
 } from "@/lib/types";
 
@@ -61,6 +66,18 @@ export async function parseResume(file: File): Promise<Profile> {
   return unwrap<Profile>(res);
 }
 
+// --- Resume & draft history (Theme E) ---------------------------------------
+
+export async function listResumes(): Promise<ResumeUpload[]> {
+  const res = await fetch("/api/resume/list", { method: "GET" });
+  return unwrap<ResumeUpload[]>(res);
+}
+
+export async function listDrafts(): Promise<DraftSummary[]> {
+  const res = await fetch("/api/resume/drafts", { method: "GET" });
+  return unwrap<DraftSummary[]>(res);
+}
+
 // --- Jobs (FR-6 / FR-10) ----------------------------------------------------
 
 export interface SearchJobsParams {
@@ -89,6 +106,13 @@ export async function searchJobs(params: SearchJobsParams): Promise<Job[]> {
   return unwrap<Job[]>(res);
 }
 
+// --- Role suggestions (Theme 2 / G) -----------------------------------------
+
+export async function suggestRoles(): Promise<{ suggestions: RoleSuggestion[] }> {
+  const res = await fetch("/api/roles/suggest", { method: "GET" });
+  return unwrap<RoleSuggestionsResponse>(res);
+}
+
 export async function saveJob(
   job: Job,
   status?: SavedJobStatus
@@ -101,9 +125,30 @@ export async function saveJob(
   return unwrap<SavedJob>(res);
 }
 
-export async function listSavedJobs(): Promise<SavedJob[]> {
+export async function listSavedJobs(): Promise<SavedJobDetail[]> {
   const res = await fetch("/api/jobs/saved", { method: "GET" });
-  return unwrap<SavedJob[]>(res);
+  return unwrap<SavedJobDetail[]>(res);
+}
+
+export async function updateSavedJobStatus(
+  jobId: string,
+  status: SavedJobStatus
+): Promise<SavedJob> {
+  const res = await fetch("/api/jobs/saved", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, status }),
+  });
+  return unwrap<SavedJob>(res);
+}
+
+export async function deleteSavedJob(jobId: string): Promise<{ job_id: string }> {
+  const res = await fetch("/api/jobs/saved", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+  return unwrap<{ job_id: string }>(res);
 }
 
 // --- Match scoring (FR-7) ---------------------------------------------------
