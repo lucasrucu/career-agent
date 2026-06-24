@@ -50,6 +50,8 @@ const styles = StyleSheet.create({
   bulletDot: { width: 10, fontSize: 10 },
   bulletText: { flex: 1 },
   skillsLine: { marginBottom: 2 },
+  interestTitle: { fontFamily: "Helvetica-Bold" },
+  interestSignal: { color: "#666" },
 });
 
 function ContactLine({ profile }: { profile: Profile }) {
@@ -135,6 +137,21 @@ export function ResumeDocument({ profile }: { profile: Profile }) {
                 {cert.name}
                 {cert.issuer ? `, ${cert.issuer}` : ""}
                 {cert.year ? ` (${cert.year})` : ""}
+              </Text>
+            ))}
+          </>
+        ) : null}
+
+        {profile.interests?.length ? (
+          <>
+            <Text style={styles.sectionTitle}>Interests &amp; Achievements</Text>
+            {profile.interests.map((it, i) => (
+              <Text key={i} style={styles.skillsLine}>
+                <Text style={styles.interestTitle}>{it.title}</Text>
+                {it.detail ? ` — ${it.detail}` : ""}
+                {it.signal ? (
+                  <Text style={styles.interestSignal}> ({it.signal})</Text>
+                ) : null}
               </Text>
             ))}
           </>

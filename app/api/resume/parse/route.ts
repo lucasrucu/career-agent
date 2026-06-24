@@ -17,6 +17,7 @@ const SYSTEM = `You are a resume parser. Extract the candidate's real informatio
 - Only use information present in the text. Never invent experience, skills, dates, or credentials.
 - Preserve accomplishment bullets close to the original wording.
 - Infer a skill level (beginner/intermediate/advanced/expert) only when the text gives clear signal (years, seniority, scope); otherwise default to "intermediate".
+- Capture signal-bearing interests, achievements, and extracurriculars (endurance sport, competitions, volunteering, open-source, leadership) into "interests" rather than discarding them — but only what the resume actually states; never invent any.
 - If the summary is missing, write a faithful 2-3 sentence summary from the actual content.`;
 
 // FR-3 — Resume upload & parsing.
