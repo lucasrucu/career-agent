@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bookmark, Briefcase, Gauge, Search, UserCog } from "lucide-react";
+import { Bookmark, Gauge, Search, UserCog } from "lucide-react";
 
+import { QoriMark } from "@/components/QoriMark";
 import { SignOutButton } from "@/components/SignOutButton";
 import { cn } from "@/lib/utils";
 import { DashboardUIProvider, useDashboardUI } from "./DashboardUIContext";
@@ -51,12 +52,7 @@ function DashboardShell({ userName }: { userName: string }) {
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
       <header className="flex items-center justify-between pb-6">
-        <div className="flex items-center gap-2 font-medium">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Briefcase className="size-4" />
-          </span>
-          Career Agent
-        </div>
+        <QoriMark glyph="briefcase" label="Career Agent" size={28} />
         <SignOutButton />
       </header>
 

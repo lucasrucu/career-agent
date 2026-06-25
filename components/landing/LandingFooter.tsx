@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Briefcase, Code2 } from "lucide-react";
+import { Code2 } from "lucide-react";
 
+import { QoriMark } from "@/components/QoriMark";
 import { APP_NAME, GITHUB_HREF } from "@/components/landing/constants";
 
 const STACK = ["Next.js", "TypeScript", "Supabase", "Claude", "Adzuna", "Vercel"];
@@ -10,10 +11,7 @@ export function LandingFooter() {
     <footer className="border-t border-border">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-6 px-4 py-10 sm:flex-row sm:justify-between">
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary/15 text-primary">
-            <Briefcase className="size-3.5" />
-          </span>
-          <span className="font-semibold">{APP_NAME}</span>
+          <QoriMark glyph="briefcase" label={APP_NAME} size={24} />
           <span className="text-sm text-muted-foreground">· built by Lucas Ruiz</span>
         </div>
 

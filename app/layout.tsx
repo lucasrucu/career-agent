@@ -19,7 +19,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Career Agent",
+  metadataBase: new URL("https://career.qori.land"),
+  title: "Career Agent — Resume in, tailored applications out.",
   description:
     "Turn your experience into targeted applications — AI skill-mapping, real job listings, match scores, and tailored resumes.",
 };
