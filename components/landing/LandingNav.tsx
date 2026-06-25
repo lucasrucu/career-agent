@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Briefcase } from "lucide-react";
 
+import { QoriMark } from "@/components/QoriMark";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -14,10 +14,7 @@ export function LandingNav() {
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
         <Link href="/" className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
-            <Briefcase className="size-4" />
-          </span>
-          <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
+          <QoriMark glyph="briefcase" label={APP_NAME} size={28} />
         </Link>
 
         <div className="flex items-center gap-2">
