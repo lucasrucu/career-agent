@@ -41,10 +41,19 @@ function mapResult(r: AdzunaResultRaw): Job {
   };
 }
 
+// Adzuna country codes are two-letter ISO-3166 alpha-2 (us, gb, ca, ...). Only
+// those go into the URL path, so a caller can't smuggle path segments (e.g.
+// "../../") and redirect the fetch elsewhere.
+function normalizeCountry(raw: string | undefined): string {
+  const fallback = process.env.ADZUNA_DEFAULT_COUNTRY?.toLowerCase() ?? "us";
+  const candidate = (raw ?? fallback).trim().toLowerCase();
+  return /^[a-z]{2}$/.test(candidate) ? candidate : "us";
+}
+
 export async function searchJobs(params: JobSearchParams): Promise<Job[]> {
   const { appId, appKey } = credentials();
-  const country = params.country ?? process.env.ADZUNA_DEFAULT_COUNTRY ?? "us";
-  const page = params.page ?? 1;
+  const country = normalizeCountry(params.country);
+  const page = Number.isInteger(params.page) && (params.page as number) > 0 ? (params.page as number) : 1;
 
   const qs = new URLSearchParams({
     app_id: appId,
