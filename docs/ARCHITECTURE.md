@@ -102,7 +102,7 @@ All tables are defined in `supabase/migrations/0001_init.sql`, RLS-scoped by `us
 | `match_results` | `id`, `user_id`, `job_id`, `profile_version`, `match_pct`, `strengths/gaps/keywords jsonb` | **`unique (user_id, job_id, profile_version)`** — this constraint *is* the match cache; the route upserts on it. |
 | `resume_drafts` | `id`, `user_id`, `job_id`, `profile_version`, `content jsonb`, `export_filename` | **`unique (user_id, job_id, profile_version)`** — one tailored draft per job per profile version; `content` is a tailored `Profile`. |
 
-The `(user_id, job_id, profile_version)` unique constraints on `match_results` and `resume_drafts` are what let the routes use `upsert(..., { onConflict })` as an idempotent cache write. The migration also documents a guest-data 30-day retention cleanup as a **TODO**, not yet enforced in v1.
+The `(user_id, job_id, profile_version)` unique constraints on `match_results` and `resume_drafts` are what let the routes use `upsert(..., { onConflict })` as an idempotent cache write. Guest-data 30-day retention is implemented by the runner in `app/api/admin/retention/route.ts` with the pure selection logic in `lib/retention.ts` (see §11); it is **dry-run by default and not yet enabled**.
 
 ## 9. Dashboard data flow
 
@@ -120,4 +120,29 @@ The dashboard is a client tree (`app/dashboard/DashboardClient.tsx`) with three 
 - **English-only.** Prompts, the ATS PDF (Helvetica), and the parsing assumptions are English-oriented; non-English resumes/postings aren't a tested path.
 - **The `Profile` schema has no field for interests, extracurriculars, or non-professional achievements.** `PROFILE_SCHEMA` covers contact, summary, experience, education, skills, and certifications only — so hobbies and things like sports accomplishments are **dropped on parse**. This is a deliberate v1 scope cut, not a bug, but it's a real data-loss edge.
 - **The profile version bump is not atomic.** `PUT /api/profile` reads the current `version` and then upserts `version + 1` in two steps; under concurrent saves this read-modify-write could collide. It's safe for the single-user, single-session usage this app targets, but it isn't a transaction.
-- **Guest-data retention is unimplemented.** The 30-day cleanup is documented in the migration as a TODO; nothing currently prunes old rows or storage objects.
+- **Guest-data retention ships dry-run and disabled.** The 30-day cleanup logic exists (`lib/retention.ts` + `app/api/admin/retention/route.ts`, see §11), but it runs in dry-run mode until `RETENTION_DRY_RUN=false` and a cron/manual trigger are wired up, so nothing is pruned in the default deploy.
+
+## 11. Guest-data retention
+
+Guest accounts (any authenticated user not on the owner allowlist) have their career-agent data pruned 30 days after their newest activity. PRD §9 marks this low priority; it is built so it can be enabled with one env change, but ships **off**.
+
+- **Pure selection** — `lib/retention.ts` decides *which* users are eligible: non-owner AND newest activity strictly older than `retentionDays`. It is side-effect-free and unit-tested by `scripts/retention-selftest.ts` (`npx tsx scripts/retention-selftest.ts`). The owner allowlist comes from `OWNER_EMAILS` with a hardcoded safe default of `lucasruiz1336@gmail.com`, so a misconfig can never make the operator's own account prunable. Unknown/undateable activity is fail-safe: never pruned.
+- **Runner** — `app/api/admin/retention/route.ts` (POST, service-role). It lists auth users, folds each user's last sign-in and newest row across the five career-agent tables into one activity timestamp, selects the eligible ids, and for each one counts rows per table + storage objects. It deletes each of `resume_drafts`, `match_results`, `saved_jobs`, `resumes`, `profiles` explicitly (scoped to that `user_id`, not relying on cascade) and removes the user's objects under `resumes/{user_id}/`.
+- **Never deletes the auth user.** The auth pool is shared with `snip` (whose `links.user_id` references `auth.users`), so deleting a user could cascade-destroy snip data. The runner prunes only career-agent's own rows and storage, never `auth.users` and never anything of snip's.
+- **Two guards, dry-run default.** It refuses without the service-role key, and requires a shared secret in the `x-retention-secret` header (env `RETENTION_SECRET`) so a random visitor can't trigger it. It only deletes when `RETENTION_DRY_RUN` is exactly `"false"`; otherwise it logs and returns a structured report (user ids, per-table row counts, storage object counts) and deletes nothing.
+- **Index migration** — `supabase/migrations/0003_retention_indexes.sql` adds composite `(user_id, timestamp)` indexes for the activity scan and scoped deletes. It is committed but **not applied**.
+
+**Enabling it (Lucas):**
+
+1. Apply `supabase/migrations/0003_retention_indexes.sql` to the shared project (Supabase SQL editor or MCP).
+2. Set the env vars on Vercel: `RETENTION_SECRET` (a long random value), optionally `OWNER_EMAILS` / `RETENTION_DAYS`, and finally `RETENTION_DRY_RUN=false` when you are ready to actually delete. Leave `RETENTION_DRY_RUN` unset first and inspect a dry-run report.
+3. Trigger it. Manual dry-run check:
+   ```bash
+   curl -X POST https://<your-app>.vercel.app/api/admin/retention \
+     -H "x-retention-secret: $RETENTION_SECRET"
+   ```
+   Or schedule it with a Vercel cron in `vercel.json` (the cron path can't send a custom header, so front it with a thin authenticated wrapper or use Vercel's cron secret — keep `RETENTION_SECRET` server-side):
+   ```json
+   { "crons": [{ "path": "/api/admin/retention", "schedule": "0 4 * * *" }] }
+   ```
+   Note: a bare Vercel cron GET won't pass the `x-retention-secret` header or the POST method, so wire the trigger to send both (a small server action, an external scheduler, or a wrapper route that injects the header) before relying on the cron. Until then, run it manually.
