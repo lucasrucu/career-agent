@@ -112,7 +112,7 @@ check("mixed set returns only the eligible guests", () => {
 // --- classifyDeleteProgress: the live-run audit trail (round-3 fix) ----------
 
 const progress = (over: Partial<DeleteProgress>): DeleteProgress => ({
-  storageAttempted: false,
+  storagePresent: false,
   storageDeleted: false,
   deletedTables: [],
   totalTables: 5,
@@ -124,7 +124,7 @@ check("clean delete of every scope classifies as 'deleted'", () => {
   assert.equal(
     classifyDeleteProgress(
       progress({
-        storageAttempted: true,
+        storagePresent: true,
         storageDeleted: true,
         deletedTables: ["a", "b", "c", "d", "e"],
       }),
@@ -136,7 +136,7 @@ check("clean delete of every scope classifies as 'deleted'", () => {
 check("delete with no storage to remove still classifies as 'deleted'", () => {
   assert.equal(
     classifyDeleteProgress(
-      progress({ storageAttempted: false, deletedTables: ["a", "b", "c", "d", "e"] }),
+      progress({ storagePresent: false, deletedTables: ["a", "b", "c", "d", "e"] }),
     ),
     "deleted",
   );
@@ -160,7 +160,7 @@ check("error after deleting some tables classifies as 'partial'", () => {
 check("error after storage removed but no table done is still 'partial'", () => {
   assert.equal(
     classifyDeleteProgress(
-      progress({ storageAttempted: true, storageDeleted: true, errored: true, deletedTables: [] }),
+      progress({ storagePresent: true, storageDeleted: true, errored: true, deletedTables: [] }),
     ),
     "partial",
   );
@@ -170,7 +170,7 @@ check("all tables gone but storage remove failed is 'partial', not 'deleted'", (
   assert.equal(
     classifyDeleteProgress(
       progress({
-        storageAttempted: true,
+        storagePresent: true,
         storageDeleted: false,
         errored: true,
         deletedTables: ["a", "b", "c", "d", "e"],

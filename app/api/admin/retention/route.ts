@@ -138,6 +138,17 @@ function secretsMatch(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+// Requested window size for the activity scan. PostgREST caps a single response
+// at the project's `db-max-rows` (this project is SHARED, so we cannot assume it
+// is unlimited). We read every table in explicit `.range()` windows and advance
+// by the number of rows we ACTUALLY got back, stopping only on an empty page.
+// That way, even if the server caps a window below the size we asked for, we
+// simply take more trips instead of stopping early. A capped response can never
+// truncate a user's NEWEST row out of the scan and make an active guest look
+// older than they really are, which would wrongly delete their live data. Same
+// pagination rigor as listAllAuthUsers/listStoragePaths.
+const ACTIVITY_WINDOW = 1000;
+
 /** Newest ISO timestamp per user across all career-agent tables. */
 async function activityByUser(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -145,18 +156,35 @@ async function activityByUser(
   const map = new Map<string, string>();
 
   for (const [table, column] of Object.entries(ACTIVITY_COLUMNS)) {
-    const { data, error } = await supabase.from(table).select(`user_id, ${column}`);
-    if (error) {
-      throw new Error(`Failed reading ${table}: ${error.message}`);
-    }
-    for (const row of (data ?? []) as unknown as Array<Record<string, unknown>>) {
-      const userId = row.user_id as string | null;
-      const ts = row[column] as string | null;
-      if (!userId || !ts) continue;
-      const existing = map.get(userId);
-      if (!existing || new Date(ts).getTime() > new Date(existing).getTime()) {
-        map.set(userId, ts);
+    // Order by the primary key so successive windows are stable (no rows skipped
+    // or double-counted across pages). We fold every row into the max regardless
+    // of column ordering, so ordering is only about pagination stability, not
+    // correctness of the max.
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from(table)
+        .select(`user_id, ${column}`)
+        .order("user_id", { ascending: true })
+        .range(offset, offset + ACTIVITY_WINDOW - 1);
+      if (error) {
+        throw new Error(`Failed reading ${table}: ${error.message}`);
       }
+      const batch = (data ?? []) as unknown as Array<Record<string, unknown>>;
+      for (const row of batch) {
+        const userId = row.user_id as string | null;
+        const ts = row[column] as string | null;
+        if (!userId || !ts) continue;
+        const existing = map.get(userId);
+        if (!existing || new Date(ts).getTime() > new Date(existing).getTime()) {
+          map.set(userId, ts);
+        }
+      }
+      // Advance by what the server actually returned (which may be less than
+      // ACTIVITY_WINDOW if db-max-rows caps it), and stop only when a page comes
+      // back empty. This is truncation-proof for any cap value.
+      if (batch.length === 0) break;
+      offset += batch.length;
     }
   }
 
@@ -273,7 +301,7 @@ async function deleteUserData(
   storagePaths: string[],
 ): Promise<{ progress: DeleteProgress; error?: string; failedScope?: string }> {
   const progress: DeleteProgress = {
-    storageAttempted: storagePaths.length > 0,
+    storagePresent: storagePaths.length > 0,
     storageDeleted: false,
     deletedTables: [],
     totalTables: USER_TABLES.length,
@@ -295,7 +323,12 @@ async function deleteUserData(
     progress.deletedTables.push(table);
   }
 
-  // Then storage objects under `{userId}/`.
+  // Then storage objects under `{userId}/`. This removes every path in ONE
+  // call: fine for demo scale (a guest has a handful of resumes). If a guest
+  // could ever accumulate hundreds of objects, chunk `storagePaths` into
+  // batches here, because a single remove() with a huge list can hit request
+  // limits, and its partial success within one call is not reflected in
+  // `storageDeleted` (which is all-or-nothing per call).
   if (storagePaths.length > 0) {
     const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(storagePaths);
     if (error) {

@@ -121,8 +121,11 @@ export function selectEligibleUserIds(
  * exactly what was destroyed instead of collapsing to "nothing happened".
  */
 export interface DeleteProgress {
-  // Was there any storage object to remove for this user?
-  storageAttempted: boolean;
+  // Were there any storage objects present to remove for this user? (This is
+  // "storage existed", NOT "the remove call ran" — it is set from the pre-delete
+  // path count, so the classifier can tell "nothing to remove" apart from
+  // "remove failed".)
+  storagePresent: boolean;
   // Did the storage remove call return without error?
   storageDeleted: boolean;
   // Names of the tables whose delete returned without error, in order.
@@ -145,7 +148,7 @@ export type DeleteStatus = "deleted" | "partial" | "failed";
 export function classifyDeleteProgress(p: DeleteProgress): DeleteStatus {
   const destroyedSomething = p.storageDeleted || p.deletedTables.length > 0;
   const allTablesDeleted = p.deletedTables.length >= p.totalTables;
-  const storageOk = !p.storageAttempted || p.storageDeleted;
+  const storageOk = !p.storagePresent || p.storageDeleted;
 
   if (!p.errored && storageOk && allTablesDeleted) return "deleted";
   if (destroyedSomething) return "partial";
