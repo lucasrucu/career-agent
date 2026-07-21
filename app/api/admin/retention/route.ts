@@ -68,6 +68,20 @@ const ACTIVITY_COLUMNS: Record<string, string> = {
   resume_drafts: "updated_at",
 };
 
+// Per-table UNIQUE column to page the activity scan by. Offset/range pagination
+// is only stable when the sort key is unique: over a non-unique key Postgres does
+// NOT guarantee a consistent row order across pages, so a user's newest row could
+// be skipped at a page boundary and date an active guest as older than they are.
+// `profiles` is keyed by user_id (its PK, one row per user); the four child tables
+// have a non-unique user_id, so we page them by their real PK `id` (0001_init.sql).
+const PAGINATION_KEYS: Record<string, string> = {
+  profiles: "user_id",
+  resumes: "id",
+  saved_jobs: "id",
+  match_results: "id",
+  resume_drafts: "id",
+};
+
 // The guest-facing "Request Access" table (0002_access_requests.sql). It stores
 // guest PII — email, ip, user_agent, note — for people who submit the landing
 // form. It has NO user_id and no FK, so a guest who never gets an approved auth
@@ -156,16 +170,19 @@ async function activityByUser(
   const map = new Map<string, string>();
 
   for (const [table, column] of Object.entries(ACTIVITY_COLUMNS)) {
-    // Order by the primary key so successive windows are stable (no rows skipped
-    // or double-counted across pages). We fold every row into the max regardless
-    // of column ordering, so ordering is only about pagination stability, not
-    // correctness of the max.
+    // Order by a UNIQUE key so successive windows are stable (no rows skipped or
+    // double-counted across pages). Ordering by the non-unique user_id would let
+    // Postgres reorder rows between pages and drop a user's newest row at a page
+    // boundary. See PAGINATION_KEYS: user_id for `profiles` (its PK), `id` for the
+    // child tables. We fold every row into the max regardless of column ordering,
+    // so ordering is only about pagination stability, not correctness of the max.
+    const orderKey = PAGINATION_KEYS[table];
     let offset = 0;
     for (;;) {
       const { data, error } = await supabase
         .from(table)
         .select(`user_id, ${column}`)
-        .order("user_id", { ascending: true })
+        .order(orderKey, { ascending: true })
         .range(offset, offset + ACTIVITY_WINDOW - 1);
       if (error) {
         throw new Error(`Failed reading ${table}: ${error.message}`);
