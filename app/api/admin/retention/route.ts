@@ -1,31 +1,45 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   DEFAULT_RETENTION_DAYS,
   parseOwnerEmails,
+  retentionCutoff,
   selectEligibleUserIds,
   type RetentionUser,
 } from "@/lib/retention";
 
-// Guest-data retention runner (PRD §9, ARCHITECTURE §8).
+// Guest-data retention runner (PRD §9, ARCHITECTURE §8, §11).
 //
 // Prunes career-agent data for guest (non-owner) accounts whose newest activity
-// is older than the retention window. It is DRY-RUN by default: it only deletes
-// when RETENTION_DRY_RUN is explicitly set to the string "false". Otherwise it
+// is older than the retention window, plus stale rows in the guest-facing
+// `access_requests` table. It is DRY-RUN by default: it only deletes when
+// RETENTION_DRY_RUN is explicitly set to the string "false". Otherwise it
 // reports what it WOULD delete and touches nothing.
 //
 // SHARED-PROJECT SAFETY: this Supabase project is shared with `snip`
 // (ref xbpbuwrrpnhaubimihpq). This runner only ever names career-agent's OWN
-// tables and the `resumes` storage bucket. It NEVER touches `snip`'s `links`
-// table or anything outside the list below. It also NEVER deletes the auth user
-// itself — see the note on AUTH_USER_DELETE below.
+// tables (the five user-data tables + `access_requests`, scoped to
+// app = 'career-agent') and the `resumes` storage bucket. It NEVER touches
+// `snip`'s `links` table or anything outside the lists below. It also NEVER
+// deletes the auth user itself — see the note on AUTH_USER_DELETE below.
+//
+// WHAT "ACTIVITY" MEANS (deliberate limitation): a user's newest activity is the
+// max of their auth `created_at`, `last_sign_in_at`, and the newest row across
+// the five career-agent tables. That is WRITES + explicit sign-ins only. A
+// persistent auto-refreshing session (token refresh with no fresh sign-in and no
+// new writes) does NOT register as activity, so a guest who only reads their
+// saved data for weeks can still become eligible. This is accepted for a 30-day
+// window on a demo app; if it matters later, add a heartbeat write on read or
+// read GoTrue session refresh times. Documented in ARCHITECTURE §10/§11.
 //
 // Trigger it server-side only (Vercel cron or a manual authenticated curl). Two
 // guards keep a random visitor from running it:
 //   1. it refuses without the service-role key (misconfigured deploy), and
 //   2. it requires a shared secret in the `x-retention-secret` header that must
-//      equal env RETENTION_SECRET.
+//      equal env RETENTION_SECRET (compared in constant time).
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +65,16 @@ const ACTIVITY_COLUMNS: Record<string, string> = {
   resume_drafts: "updated_at",
 };
 
+// The guest-facing "Request Access" table (0002_access_requests.sql). It stores
+// guest PII — email, ip, user_agent, note — for people who submit the landing
+// form. It has NO user_id and no FK, so a guest who never gets an approved auth
+// account never enters the per-user scan above; their PII would otherwise live
+// forever. We prune rows older than the retention window by `created_at`, scoped
+// to app = 'career-agent' so we never touch another app's rows in this shared
+// table.
+const ACCESS_REQUESTS_TABLE = "access_requests";
+const ACCESS_REQUESTS_APP = "career-agent";
+
 // We do NOT delete the auth.users row. The auth pool is SHARED with snip, and
 // snip's `links.user_id` references auth.users(id). Deleting a user here could
 // cascade-destroy that user's snip data — out of scope and dangerous. Pruning
@@ -68,6 +92,13 @@ interface UserReport {
   newest_activity: string | null;
   rows: TableCount;
   storage_objects: number;
+  deleted: boolean;
+  error?: string;
+}
+
+interface RunError {
+  scope: string;
+  error: string;
 }
 
 function isLiveRun(): boolean {
@@ -79,6 +110,17 @@ function retentionDays(): number {
   const raw = process.env.RETENTION_DAYS;
   const n = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_RETENTION_DAYS;
+}
+
+/**
+ * Constant-time secret comparison. Both sides are hashed to a fixed-length
+ * digest first so `timingSafeEqual` always gets equal-length buffers and the
+ * comparison leaks neither the secret's length nor its content via timing.
+ */
+function secretsMatch(provided: string, expected: string): boolean {
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 /** Newest ISO timestamp per user across all career-agent tables. */
@@ -106,7 +148,13 @@ async function activityByUser(
   return map;
 }
 
-/** Every auth user, paginated via the admin API. */
+/**
+ * Every auth user, paginated via the admin API. Uses GoTrue's own `nextPage`
+ * cursor when the client surfaces it (authoritative), and only falls back to a
+ * "full page returned" heuristic when it doesn't — so we never stop early while
+ * more users exist (which would silently skip pruning them). Page size is kept
+ * within GoTrue's supported range.
+ */
 async function listAllAuthUsers(
   supabase: ReturnType<typeof getSupabaseAdmin>,
 ): Promise<Array<{ id: string; email: string | null; created_at: string; last_sign_in_at: string | null }>> {
@@ -117,8 +165,9 @@ async function listAllAuthUsers(
     last_sign_in_at: string | null;
   }> = [];
 
-  const perPage = 1000;
-  for (let page = 1; ; page++) {
+  const perPage = 50;
+  let page = 1;
+  for (;;) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
     if (error) throw new Error(`Failed listing auth users: ${error.message}`);
     const users = data?.users ?? [];
@@ -130,7 +179,19 @@ async function listAllAuthUsers(
         last_sign_in_at: u.last_sign_in_at ?? null,
       });
     }
-    if (users.length < perPage) break;
+
+    const nextPage = (data as { nextPage?: number | null } | null)?.nextPage;
+    if (typeof nextPage === "number" && nextPage > page) {
+      page = nextPage;
+      continue;
+    }
+    // Older clients may not surface nextPage; only then fall back to the length
+    // heuristic, and keep going while a full page came back.
+    if (nextPage === undefined && users.length === perPage) {
+      page += 1;
+      continue;
+    }
+    break;
   }
 
   return out;
@@ -153,19 +214,32 @@ async function countRowsForUser(
   return counts;
 }
 
-/** Storage object paths under `{userId}/` in the resumes bucket. */
+/**
+ * Storage object paths under `{userId}/` in the resumes bucket. Paginated so a
+ * user with more than one page of objects still has every path returned (an
+ * un-paginated list would leave the overflow undeleted).
+ */
 async function listStoragePaths(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   userId: string,
 ): Promise<string[]> {
   // Files are stored one level deep as `{userId}/{name}` (see resume/parse).
-  const { data, error } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .list(userId, { limit: 1000 });
-  if (error) throw new Error(`Failed listing storage for ${userId}: ${error.message}`);
-  return (data ?? [])
-    .filter((obj) => obj.name && obj.id !== null) // skip folder placeholders
-    .map((obj) => `${userId}/${obj.name}`);
+  const paths: string[] = [];
+  const pageSize = 100;
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .list(userId, { limit: pageSize, offset });
+    if (error) throw new Error(`Failed listing storage for ${userId}: ${error.message}`);
+    const batch = data ?? [];
+    for (const obj of batch) {
+      if (obj.name && obj.id !== null) paths.push(`${userId}/${obj.name}`); // skip folder placeholders
+    }
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+  return paths;
 }
 
 async function deleteUserData(
@@ -186,6 +260,33 @@ async function deleteUserData(
   // Intentionally NOT deleting the auth.users row — see AUTH_USER_DELETE.
 }
 
+/** Count career-agent access_requests older than the cutoff. */
+async function countStaleAccessRequests(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  cutoffIso: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from(ACCESS_REQUESTS_TABLE)
+    .select("*", { count: "exact", head: true })
+    .eq("app", ACCESS_REQUESTS_APP)
+    .lt("created_at", cutoffIso);
+  if (error) throw new Error(`Failed counting access_requests: ${error.message}`);
+  return count ?? 0;
+}
+
+/** Delete career-agent access_requests older than the cutoff (live runs only). */
+async function deleteStaleAccessRequests(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  cutoffIso: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from(ACCESS_REQUESTS_TABLE)
+    .delete()
+    .eq("app", ACCESS_REQUESTS_APP)
+    .lt("created_at", cutoffIso);
+  if (error) throw new Error(`Failed deleting access_requests: ${error.message}`);
+}
+
 export async function POST(request: Request) {
   // Guard 1: shared secret. Without RETENTION_SECRET configured we refuse to run
   // at all, so the endpoint can never be triggered anonymously.
@@ -197,7 +298,7 @@ export async function POST(request: Request) {
     );
   }
   const provided = request.headers.get("x-retention-secret");
-  if (!provided || provided !== secret) {
+  if (!provided || !secretsMatch(provided, secret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -216,35 +317,51 @@ export async function POST(request: Request) {
   const ownerEmails = parseOwnerEmails(process.env.OWNER_EMAILS);
   const dryRun = !isLiveRun();
   const now = new Date();
+  const cutoff = retentionCutoff(days, now);
 
+  // Fatal (pre-loop) failures return 500 with no partial state to report.
+  let authUsers: Awaited<ReturnType<typeof listAllAuthUsers>>;
+  let activity: Map<string, string>;
   try {
-    const [authUsers, activity] = await Promise.all([
+    [authUsers, activity] = await Promise.all([
       listAllAuthUsers(supabase),
       activityByUser(supabase),
     ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Retention scan failed.";
+    console.error("[retention] scan error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
-    const users: RetentionUser[] = authUsers.map((u) => {
-      // Newest activity = max of (auth created_at, last_sign_in, newest data row).
-      const dataTs = activity.get(u.id) ?? null;
-      const signalTimes = [u.last_sign_in_at, dataTs].filter((v): v is string => !!v);
-      const newest = signalTimes.reduce<string | null>((best, ts) => {
-        if (!best) return ts;
-        return new Date(ts).getTime() > new Date(best).getTime() ? ts : best;
-      }, null);
-      return {
-        id: u.id,
-        email: u.email,
-        created_at: u.created_at,
-        last_activity_at: newest,
-      };
-    });
+  const users: RetentionUser[] = authUsers.map((u) => {
+    // Newest activity = max of (auth created_at, last_sign_in, newest data row).
+    const dataTs = activity.get(u.id) ?? null;
+    const signalTimes = [u.last_sign_in_at, dataTs].filter((v): v is string => !!v);
+    const newest = signalTimes.reduce<string | null>((best, ts) => {
+      if (!best) return ts;
+      return new Date(ts).getTime() > new Date(best).getTime() ? ts : best;
+    }, null);
+    return {
+      id: u.id,
+      email: u.email,
+      created_at: u.created_at,
+      last_activity_at: newest,
+    };
+  });
 
-    const eligibleIds = selectEligibleUserIds(users, { retentionDays: days, ownerEmails, dryRun }, now);
-    const eligibleSet = new Set(eligibleIds);
-    const eligibleUsers = users.filter((u) => eligibleSet.has(u.id));
+  const eligibleIds = selectEligibleUserIds(users, { retentionDays: days, ownerEmails, dryRun }, now);
+  const eligibleSet = new Set(eligibleIds);
+  const eligibleUsers = users.filter((u) => eligibleSet.has(u.id));
 
-    const reports: UserReport[] = [];
-    for (const u of eligibleUsers) {
+  // Per-user work is wrapped so a transient failure on one user does NOT abandon
+  // the audit trail for the rest of the batch. Each user's outcome (including a
+  // failure) is recorded and returned, so a live run always yields a record of
+  // exactly what was and wasn't destroyed.
+  const reports: UserReport[] = [];
+  const errors: RunError[] = [];
+
+  for (const u of eligibleUsers) {
+    try {
       const [rows, storagePaths] = await Promise.all([
         countRowsForUser(supabase, u.id),
         listStoragePaths(supabase, u.id),
@@ -260,39 +377,68 @@ export async function POST(request: Request) {
         newest_activity: u.last_activity_at ?? u.created_at,
         rows,
         storage_objects: storagePaths.length,
+        deleted: !dryRun,
       });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "unknown error";
+      errors.push({ scope: `user:${u.id}`, error: message });
+      reports.push({
+        user_id: u.id,
+        email: u.email,
+        newest_activity: u.last_activity_at ?? u.created_at,
+        rows: {},
+        storage_objects: 0,
+        deleted: false,
+        error: message,
+      });
+      // continue — keep processing the rest so the report stays complete.
     }
-
-    const totalRows = reports.reduce(
-      (sum, r) => sum + Object.values(r.rows).reduce((a, b) => a + b, 0),
-      0,
-    );
-    const totalStorage = reports.reduce((sum, r) => sum + r.storage_objects, 0);
-
-    const summary = {
-      mode: dryRun ? ("dry_run" as const) : ("live" as const),
-      retention_days: days,
-      owner_emails: ownerEmails,
-      auth_users_scanned: users.length,
-      eligible_users: reports.length,
-      would_delete_rows: totalRows,
-      would_delete_storage_objects: totalStorage,
-      auth_users_deleted: 0, // never — auth.users is shared with snip
-      ran_at: now.toISOString(),
-      users: reports,
-    };
-
-    // Structured log so a cron run leaves a readable audit trail.
-    console.log(
-      `[retention] ${summary.mode}: ${summary.eligible_users} eligible / ` +
-        `${summary.auth_users_scanned} scanned, ${totalRows} rows, ` +
-        `${totalStorage} storage objects (retentionDays=${days})`,
-    );
-
-    return NextResponse.json({ data: summary });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Retention run failed.";
-    console.error("[retention] error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  // Prune stale guest access_requests (PII with no auth user behind it).
+  let accessRequestsPruned = 0;
+  try {
+    accessRequestsPruned = await countStaleAccessRequests(supabase, cutoff.toISOString());
+    if (!dryRun && accessRequestsPruned > 0) {
+      await deleteStaleAccessRequests(supabase, cutoff.toISOString());
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    errors.push({ scope: "access_requests", error: message });
+  }
+
+  const totalRows = reports.reduce(
+    (sum, r) => sum + Object.values(r.rows).reduce((a, b) => a + b, 0),
+    0,
+  );
+  const totalStorage = reports.reduce((sum, r) => sum + r.storage_objects, 0);
+
+  const summary = {
+    mode: dryRun ? ("dry_run" as const) : ("live" as const),
+    ok: errors.length === 0,
+    retention_days: days,
+    cutoff: cutoff.toISOString(),
+    owner_emails: ownerEmails,
+    auth_users_scanned: users.length,
+    eligible_users: reports.length,
+    would_delete_rows: totalRows,
+    would_delete_storage_objects: totalStorage,
+    would_delete_access_requests: accessRequestsPruned,
+    auth_users_deleted: 0, // never — auth.users is shared with snip (AUTH_USER_DELETE=false)
+    ran_at: now.toISOString(),
+    errors,
+    users: reports,
+  };
+
+  // Structured log so a cron run leaves a readable audit trail.
+  console.log(
+    `[retention] ${summary.mode}: ${summary.eligible_users} eligible / ` +
+      `${summary.auth_users_scanned} scanned, ${totalRows} rows, ` +
+      `${totalStorage} storage objects, ${accessRequestsPruned} access_requests ` +
+      `(retentionDays=${days}, errors=${errors.length})`,
+  );
+
+  // Partial failures still return the full audit trail; 207 signals "some scopes
+  // errored" while delivering the body. A clean run is 200.
+  return NextResponse.json({ data: summary }, { status: errors.length === 0 ? 200 : 207 });
 }
