@@ -4,10 +4,13 @@ import { NextResponse } from "next/server";
 
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
+  classifyDeleteProgress,
   DEFAULT_RETENTION_DAYS,
   parseOwnerEmails,
   retentionCutoff,
   selectEligibleUserIds,
+  type DeleteProgress,
+  type DeleteStatus,
   type RetentionUser,
 } from "@/lib/retention";
 
@@ -90,9 +93,21 @@ interface UserReport {
   user_id: string;
   email: string | null;
   newest_activity: string | null;
+  // Pre-delete row counts per table. Preserved even on a failed/partial delete so
+  // the trail shows what existed, never a misleading empty object.
   rows: TableCount;
   storage_objects: number;
-  deleted: boolean;
+  // On a dry run: "would delete this much, touched nothing".
+  // On a live run: the true outcome — see DeleteStatus.
+  //   "deleted"  every scope cleared.
+  //   "partial"  SOME data destroyed but not all (the run errored mid-way).
+  //   "failed"   errored before destroying anything (safe to retry).
+  //   "planned"  dry run, nothing touched.
+  status: DeleteStatus | "planned";
+  deleted: boolean; // convenience: status === "deleted"
+  // On a live run that touched storage/tables, which scopes actually completed.
+  // Present whenever a delete was attempted (live run) so partial state is legible.
+  destroyed?: { storage_removed: boolean; tables_deleted: string[] };
   error?: string;
 }
 
@@ -242,22 +257,60 @@ async function listStoragePaths(
   return paths;
 }
 
+/**
+ * Delete one guest's career-agent data (tables first, then storage) and return a
+ * DeleteProgress describing exactly what completed. It does NOT throw on a
+ * per-scope failure: it stops at the first error, records it, and hands the
+ * partial progress back so the caller can log the truth. Tables are cleared
+ * BEFORE storage so that if the run dies mid-way the still-present storage
+ * objects are re-listable on the next run (rows that reference them are gone,
+ * but the bytes can still be found and swept), rather than the reverse where
+ * orphaned rows would point at already-deleted files.
+ */
 async function deleteUserData(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   userId: string,
   storagePaths: string[],
-): Promise<void> {
-  // Storage first, then rows. Each table is deleted explicitly and scoped to the
-  // single user_id — never a broad delete.
-  if (storagePaths.length > 0) {
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(storagePaths);
-    if (error) throw new Error(`Failed removing storage for ${userId}: ${error.message}`);
-  }
+): Promise<{ progress: DeleteProgress; error?: string; failedScope?: string }> {
+  const progress: DeleteProgress = {
+    storageAttempted: storagePaths.length > 0,
+    storageDeleted: false,
+    deletedTables: [],
+    totalTables: USER_TABLES.length,
+    errored: false,
+  };
+
+  // Rows first. Each table is deleted explicitly and scoped to the single
+  // user_id — never a broad delete.
   for (const table of USER_TABLES) {
     const { error } = await supabase.from(table).delete().eq("user_id", userId);
-    if (error) throw new Error(`Failed deleting ${table} for ${userId}: ${error.message}`);
+    if (error) {
+      progress.errored = true;
+      return {
+        progress,
+        error: `Failed deleting ${table} for ${userId}: ${error.message}`,
+        failedScope: `table:${table}`,
+      };
+    }
+    progress.deletedTables.push(table);
   }
+
+  // Then storage objects under `{userId}/`.
+  if (storagePaths.length > 0) {
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(storagePaths);
+    if (error) {
+      progress.errored = true;
+      return {
+        progress,
+        error: `Failed removing storage for ${userId}: ${error.message}`,
+        failedScope: "storage",
+      };
+    }
+    progress.storageDeleted = true;
+  }
+
   // Intentionally NOT deleting the auth.users row — see AUTH_USER_DELETE.
+  return { progress };
 }
 
 /** Count career-agent access_requests older than the cutoff. */
@@ -361,46 +414,83 @@ export async function POST(request: Request) {
   const errors: RunError[] = [];
 
   for (const u of eligibleUsers) {
+    const newestActivity = u.last_activity_at ?? u.created_at;
+
+    // Phase 1: read the counts. A failure HERE is before any delete, so nothing
+    // was touched — report it honestly as a scan failure with zero destroyed.
+    let rows: TableCount;
+    let storagePaths: string[];
     try {
-      const [rows, storagePaths] = await Promise.all([
+      [rows, storagePaths] = await Promise.all([
         countRowsForUser(supabase, u.id),
         listStoragePaths(supabase, u.id),
       ]);
-
-      if (!dryRun) {
-        await deleteUserData(supabase, u.id, storagePaths);
-      }
-
-      reports.push({
-        user_id: u.id,
-        email: u.email,
-        newest_activity: u.last_activity_at ?? u.created_at,
-        rows,
-        storage_objects: storagePaths.length,
-        deleted: !dryRun,
-      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "unknown error";
-      errors.push({ scope: `user:${u.id}`, error: message });
+      errors.push({ scope: `user:${u.id}:scan`, error: message });
       reports.push({
         user_id: u.id,
         email: u.email,
-        newest_activity: u.last_activity_at ?? u.created_at,
+        newest_activity: newestActivity,
         rows: {},
         storage_objects: 0,
+        status: "failed",
         deleted: false,
         error: message,
       });
-      // continue — keep processing the rest so the report stays complete.
+      continue; // keep processing the rest so the batch report stays complete.
     }
+
+    // Dry run: report what WOULD go, touch nothing.
+    if (dryRun) {
+      reports.push({
+        user_id: u.id,
+        email: u.email,
+        newest_activity: newestActivity,
+        rows,
+        storage_objects: storagePaths.length,
+        status: "planned",
+        deleted: false,
+      });
+      continue;
+    }
+
+    // Phase 2: live delete. deleteUserData never throws for a per-scope failure —
+    // it returns the partial progress, so we can report EXACTLY what was and
+    // wasn't destroyed (the round-2 fix: never flatten a partial delete to
+    // "deleted: false, rows: {}"). The pre-computed `rows` above are preserved.
+    const { progress, error } = await deleteUserData(supabase, u.id, storagePaths);
+    const status = classifyDeleteProgress(progress);
+    if (error) {
+      errors.push({ scope: `user:${u.id}`, error });
+    }
+    reports.push({
+      user_id: u.id,
+      email: u.email,
+      newest_activity: newestActivity,
+      rows,
+      storage_objects: storagePaths.length,
+      status,
+      deleted: status === "deleted",
+      destroyed: {
+        storage_removed: progress.storageDeleted,
+        tables_deleted: progress.deletedTables,
+      },
+      ...(error ? { error } : {}),
+    });
   }
 
   // Prune stale guest access_requests (PII with no auth user behind it).
-  let accessRequestsPruned = 0;
+  // `accessRequestsMatched` is the pre-delete count (what matched the cutoff);
+  // `accessRequestsDeleted` records whether the delete actually completed, so a
+  // live run that counts N but errors on the delete does NOT report N as pruned.
+  let accessRequestsMatched = 0;
+  let accessRequestsDeleted = false;
   try {
-    accessRequestsPruned = await countStaleAccessRequests(supabase, cutoff.toISOString());
-    if (!dryRun && accessRequestsPruned > 0) {
+    accessRequestsMatched = await countStaleAccessRequests(supabase, cutoff.toISOString());
+    if (!dryRun && accessRequestsMatched > 0) {
       await deleteStaleAccessRequests(supabase, cutoff.toISOString());
+      accessRequestsDeleted = true;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
@@ -412,6 +502,7 @@ export async function POST(request: Request) {
     0,
   );
   const totalStorage = reports.reduce((sum, r) => sum + r.storage_objects, 0);
+  const partialUsers = reports.filter((r) => r.status === "partial").length;
 
   const summary = {
     mode: dryRun ? ("dry_run" as const) : ("live" as const),
@@ -421,9 +512,15 @@ export async function POST(request: Request) {
     owner_emails: ownerEmails,
     auth_users_scanned: users.length,
     eligible_users: reports.length,
+    // "would_delete_*" are the targeted totals (what matched), reported the same
+    // in dry and live runs. Per-user `status`/`destroyed` and `partial_users`
+    // below carry what LIVE runs actually destroyed.
     would_delete_rows: totalRows,
     would_delete_storage_objects: totalStorage,
-    would_delete_access_requests: accessRequestsPruned,
+    would_delete_access_requests: accessRequestsMatched,
+    // Live-run reality:
+    partial_users: partialUsers, // users whose delete errored after destroying some data
+    access_requests_deleted: dryRun ? false : accessRequestsDeleted,
     auth_users_deleted: 0, // never — auth.users is shared with snip (AUTH_USER_DELETE=false)
     ran_at: now.toISOString(),
     errors,
@@ -434,8 +531,8 @@ export async function POST(request: Request) {
   console.log(
     `[retention] ${summary.mode}: ${summary.eligible_users} eligible / ` +
       `${summary.auth_users_scanned} scanned, ${totalRows} rows, ` +
-      `${totalStorage} storage objects, ${accessRequestsPruned} access_requests ` +
-      `(retentionDays=${days}, errors=${errors.length})`,
+      `${totalStorage} storage objects, ${accessRequestsMatched} access_requests ` +
+      `(retentionDays=${days}, partial=${partialUsers}, errors=${errors.length})`,
   );
 
   // Partial failures still return the full audit trail; 207 signals "some scopes

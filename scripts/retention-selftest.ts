@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 
 import {
+  classifyDeleteProgress,
   DEFAULT_OWNER_EMAILS,
   DEFAULT_RETENTION_DAYS,
   parseOwnerEmails,
@@ -14,6 +15,7 @@ import {
   newestActivity,
   retentionCutoff,
   selectEligibleUserIds,
+  type DeleteProgress,
   type RetentionUser,
 } from "../lib/retention";
 
@@ -105,6 +107,77 @@ check("mixed set returns only the eligible guests", () => {
     { id: "fresh", email: "c@x.com", created_at: daysAgo(60), last_activity_at: daysAgo(2) },
   ];
   assert.deepEqual(selectEligibleUserIds(users, cfg, NOW).sort(), ["old1", "old2"]);
+});
+
+// --- classifyDeleteProgress: the live-run audit trail (round-3 fix) ----------
+
+const progress = (over: Partial<DeleteProgress>): DeleteProgress => ({
+  storageAttempted: false,
+  storageDeleted: false,
+  deletedTables: [],
+  totalTables: 5,
+  errored: false,
+  ...over,
+});
+
+check("clean delete of every scope classifies as 'deleted'", () => {
+  assert.equal(
+    classifyDeleteProgress(
+      progress({
+        storageAttempted: true,
+        storageDeleted: true,
+        deletedTables: ["a", "b", "c", "d", "e"],
+      }),
+    ),
+    "deleted",
+  );
+});
+
+check("delete with no storage to remove still classifies as 'deleted'", () => {
+  assert.equal(
+    classifyDeleteProgress(
+      progress({ storageAttempted: false, deletedTables: ["a", "b", "c", "d", "e"] }),
+    ),
+    "deleted",
+  );
+});
+
+check("error before touching anything classifies as 'failed' (safe to retry)", () => {
+  assert.equal(
+    classifyDeleteProgress(progress({ errored: true, deletedTables: [] })),
+    "failed",
+  );
+});
+
+check("error after deleting some tables classifies as 'partial'", () => {
+  // The exact case the round-2 review flagged: tables 1..N gone, then a failure.
+  assert.equal(
+    classifyDeleteProgress(progress({ errored: true, deletedTables: ["a", "b"] })),
+    "partial",
+  );
+});
+
+check("error after storage removed but no table done is still 'partial'", () => {
+  assert.equal(
+    classifyDeleteProgress(
+      progress({ storageAttempted: true, storageDeleted: true, errored: true, deletedTables: [] }),
+    ),
+    "partial",
+  );
+});
+
+check("all tables gone but storage remove failed is 'partial', not 'deleted'", () => {
+  assert.equal(
+    classifyDeleteProgress(
+      progress({
+        storageAttempted: true,
+        storageDeleted: false,
+        errored: true,
+        deletedTables: ["a", "b", "c", "d", "e"],
+      }),
+    ),
+    "partial",
+  );
 });
 
 console.log(`\nAll ${passed} checks passed.`);

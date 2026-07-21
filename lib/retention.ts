@@ -110,3 +110,44 @@ export function selectEligibleUserIds(
     })
     .map((u) => u.id);
 }
+
+// ---------------------------------------------------------------------------
+// Delete-outcome classification (pure, so the runner's audit trail is testable)
+// ---------------------------------------------------------------------------
+
+/**
+ * Progress record of one user's live delete attempt. The runner fills this in as
+ * it removes storage and then each table, so a mid-way failure still describes
+ * exactly what was destroyed instead of collapsing to "nothing happened".
+ */
+export interface DeleteProgress {
+  // Was there any storage object to remove for this user?
+  storageAttempted: boolean;
+  // Did the storage remove call return without error?
+  storageDeleted: boolean;
+  // Names of the tables whose delete returned without error, in order.
+  deletedTables: string[];
+  // How many tables the runner intends to clear for each user.
+  totalTables: number;
+  // Did the attempt throw before every scope completed?
+  errored: boolean;
+}
+
+/**
+ * How much of a user's data was actually destroyed:
+ *  - "deleted": every scope completed (nothing left behind).
+ *  - "partial": SOME data was destroyed but not all — the dangerous case the
+ *    round-2 review flagged; the audit trail must never report this as untouched.
+ *  - "failed": the attempt errored before destroying anything (safe to retry).
+ */
+export type DeleteStatus = "deleted" | "partial" | "failed";
+
+export function classifyDeleteProgress(p: DeleteProgress): DeleteStatus {
+  const destroyedSomething = p.storageDeleted || p.deletedTables.length > 0;
+  const allTablesDeleted = p.deletedTables.length >= p.totalTables;
+  const storageOk = !p.storageAttempted || p.storageDeleted;
+
+  if (!p.errored && storageOk && allTablesDeleted) return "deleted";
+  if (destroyedSomething) return "partial";
+  return "failed";
+}
