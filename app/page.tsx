@@ -5,6 +5,7 @@ import { LandingHero } from "@/components/landing/LandingHero";
 import { FeatureHighlights } from "@/components/landing/FeatureHighlights";
 import { LiveDemo } from "@/components/landing/LiveDemo";
 import { LandingCta } from "@/components/landing/LandingCta";
+import { MakerBand } from "@/components/landing/MakerBand";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { createClient } from "@/lib/supabase/server";
 
@@ -26,6 +27,7 @@ export default async function LandingPage() {
         <FeatureHighlights />
         <LiveDemo />
         <LandingCta />
+        <MakerBand />
       </main>
       <LandingFooter />
     </div>
