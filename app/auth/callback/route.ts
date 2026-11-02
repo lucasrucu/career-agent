@@ -11,12 +11,14 @@ export async function GET(request: Request) {
     const cookieStore = await cookies();
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || "public";
 
     if (!url || !anonKey) {
       return NextResponse.redirect(`${origin}/login?error=config`);
     }
 
     const supabase = createServerClient(url, anonKey, {
+      db: { schema },
       cookies: {
         getAll() {
           return cookieStore.getAll();

@@ -6,6 +6,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Job } from "@/lib/types";
 
+type AppSupabaseClient = SupabaseClient<any, string, string>;
+
 export interface JobResolveBody {
   job?: Job;
   job_id?: string;
@@ -27,7 +29,7 @@ export function localId(s: string): string {
 export async function resolveJob(
   body: JobResolveBody,
   userId: string,
-  supabase: SupabaseClient
+  supabase: AppSupabaseClient
 ): Promise<Job | null> {
   if (body.job && body.job.id) return body.job;
 

@@ -7,21 +7,25 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // touch under RLS). Memoized so we reuse one client across requests. Never import
 // this into client components — `server-only` enforces that at build time.
 
-let adminClient: SupabaseClient | null = null;
+type AdminClient = SupabaseClient<any, string, string>;
 
-export function getSupabaseAdmin(): SupabaseClient {
+let adminClient: AdminClient | null = null;
+
+export function getSupabaseAdmin(): AdminClient {
   if (adminClient) {
     return adminClient;
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || "public";
 
   if (!url || !serviceRoleKey) {
     throw new Error("Missing Supabase environment variables");
   }
 
   adminClient = createClient(url, serviceRoleKey, {
+    db: { schema },
     auth: {
       autoRefreshToken: false,
       persistSession: false,
